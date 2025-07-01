@@ -94,6 +94,8 @@ async function generateSlidesFromResearch(researchText) {
 
     Be extremely detailed, and try to describe where in the image any bullet points to text goes and be extremely specific in every artistic direction.
 
+    IMPORTANT: Ensure all XML is valid with no special characters or entities that could cause parsing errors.
+
     XML Output:`;
 
   try {
@@ -104,6 +106,10 @@ async function generateSlidesFromResearch(researchText) {
 
     let xmlContent = response.choices[0]?.message?.content?.trim();
     if (!xmlContent) throw new Error("Received empty response from GPT-4o.");
+
+    console.log("=== DEBUG: Raw GPT-4o Response ===");
+    console.log(xmlContent);
+    console.log("=== END Raw Response ===");
 
     const xmlStartIndex = xmlContent.indexOf('<slides>');
     const xmlEndIndex = xmlContent.lastIndexOf('</slides>');
@@ -120,6 +126,18 @@ async function generateSlidesFromResearch(researchText) {
     } else {
          xmlContent = xmlContent.substring(xmlStartIndex, xmlEndIndex + '</slides>'.length);
     }
+
+    console.log("=== DEBUG: Extracted XML ===");
+    console.log(xmlContent);
+    console.log("=== END Extracted XML ===");
+
+    // Clean up common XML issues - only fix unescaped ampersands
+    xmlContent = xmlContent
+      .replace(/&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)/g, '&amp;'); // Fix unescaped ampersands
+
+    console.log("=== DEBUG: Cleaned XML ===");
+    console.log(xmlContent);
+    console.log("=== END Cleaned XML ===");
 
     const parsedResult = await parseStringPromise(xmlContent, {
         explicitArray: false, trim: true, tagNameProcessors: [(name) => name.toLowerCase()]
@@ -149,6 +167,7 @@ async function generateSlidesFromResearch(researchText) {
     return slidesData;
   } catch (error) {
     console.error("Error generating or parsing slides:", error);
+    console.error("If this is an XML parsing error, check the debug output above for the actual XML content.");
     throw error;
   }
 }
@@ -158,26 +177,18 @@ async function generateImageWithRetry(imageDescription, slideText, slideNumber) 
   let retries = 0;
   const imagePath = path.join(__dirname, IMAGES_DIR, `slide_${slideNumber}_image.png`);
 
-  // Format the slide text (handle object with bullets)
-  let formattedText = '';
-  if (typeof slideText === 'object' && slideText !== null && Array.isArray(slideText.bullet)) {
-      formattedText = slideText.bullet.join('; '); // Join bullets into a single string
-  } else if (typeof slideText === 'string') {
-      formattedText = slideText; // Handle case where text might be a simple string
-  }
-
-  // Construct the combined prompt
-  const combinedPrompt = `${imageDescription}. Visually integrate the following text points naturally into the scene (e.g., on signs, screens, papers): ${formattedText}`;
+  // Use imageDescription as-is since it already contains text naturally embedded
+  const imagePrompt = imageDescription;
 
   while (retries <= MAX_IMAGE_RETRIES) {
     try {
       // Log shortened prompt to avoid overly long logs
-      const displayPrompt = combinedPrompt.length > 150 ? combinedPrompt.substring(0, 147) + "..." : combinedPrompt; // Use combined prompt for display
+      const displayPrompt = imagePrompt.length > 150 ? imagePrompt.substring(0, 147) + "..." : imagePrompt;
       console.log(`Generating image for slide ${slideNumber} (Attempt ${retries + 1}/${MAX_IMAGE_RETRIES + 1})... Prompt: "${displayPrompt}"`);
 
       const img = await client.images.generate({
         model: IMAGE_GENERATION_MODEL,
-        prompt: combinedPrompt, // Use the combined prompt for the API
+        prompt: imagePrompt,
         n: 1,
         size: IMAGE_SIZE,
       });
